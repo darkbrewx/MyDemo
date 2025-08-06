@@ -9,13 +9,14 @@ import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+//        Home()
+//        SwiftUIView()
+//        TaskManagerView()
+        NavigationStack {
+            List {
+                NavigationLink("Task Manager", destination: TaskManagerView())
+            }
         }
-        .padding()
     }
 }
 

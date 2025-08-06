@@ -1,0 +1,44 @@
+# OS X temporary files
+.DS_Store
+
+# Xcode
+
+## Various settings
+*.xcuserstate
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+ObjectiveC.gcda
+ObjectiveC.gcno
+*.xccheckout
+DeriveData
+**/xcuserdata/*
+
+## App packaging
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+# Packages/
+# Package.pins
+# Package.resolved
+.build/
+
+# CocoaPod
+Pods/
+
+# Bundler
+.bundle/*
+
+# Vendor
+vendor/*
+
+# Claude Code settings
+.claude/
