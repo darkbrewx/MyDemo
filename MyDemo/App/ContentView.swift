@@ -9,12 +9,10 @@ import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-//        Home()
-//        SwiftUIView()
-//        TaskManagerView()
         NavigationStack {
             List {
                 NavigationLink("Task Manager", destination: TaskManagerView())
+                NavigationLink("WaterfallGridDemo", destination: WaterfallGridDemo())
             }
         }
     }
