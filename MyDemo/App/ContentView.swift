@@ -13,6 +13,7 @@ struct ContentView: View {
             List {
                 NavigationLink("Task Manager", destination: TaskManagerView())
                 NavigationLink("WaterfallGridDemo", destination: WaterfallGridDemo())
+                NavigationLink("ExpandableHeaderDemo", destination: ExpandableHeaderDemo())
             }
         }
     }
