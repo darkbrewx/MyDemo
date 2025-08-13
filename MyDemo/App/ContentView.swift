@@ -15,6 +15,8 @@ struct ContentView: View {
                 NavigationLink("WaterfallGridDemo", destination: WaterfallGridDemo())
                 NavigationLink("ExpandableHeaderDemo", destination: ExpandableHeaderDemo())
                 NavigationLink("ScrollableTabViewDemo", destination: ScrollableTabViewDemo())
+                NavigationLink("DownsizedImageViewDemo", destination: DownsizedImageViewDemo())
+                NavigationLink("InfiniteScrollViewDemo", destination: InfiniteScrollViewDemo())
             }
         }
     }
