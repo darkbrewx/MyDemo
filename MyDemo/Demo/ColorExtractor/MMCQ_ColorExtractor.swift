@@ -11,6 +11,123 @@
 import UIKit
 import SwiftUI
 
+// MARK: - LAB Color Space Support
+struct LABColor {
+    let L: Double  // Lightness (0-100)
+    let A: Double  // Green-Red axis (-128 to +127)
+    let B: Double  // Blue-Yellow axis (-128 to +127)
+    
+    init(L: Double, A: Double, B: Double) {
+        self.L = L
+        self.A = A
+        self.B = B
+    }
+    
+    // Convert from RGB to LAB
+    init(red: Int, green: Int, blue: Int) {
+        // First convert RGB to XYZ
+        let r = Double(red) / 255.0
+        let g = Double(green) / 255.0
+        let b = Double(blue) / 255.0
+        
+        // Gamma correction
+        let rLinear = r > 0.04045 ? pow((r + 0.055) / 1.055, 2.4) : r / 12.92
+        let gLinear = g > 0.04045 ? pow((g + 0.055) / 1.055, 2.4) : g / 12.92
+        let bLinear = b > 0.04045 ? pow((b + 0.055) / 1.055, 2.4) : b / 12.92
+        
+        // Convert to XYZ (D65 illuminant)
+        let x = rLinear * 0.4124564 + gLinear * 0.3575761 + bLinear * 0.1804375
+        let y = rLinear * 0.2126729 + gLinear * 0.7151522 + bLinear * 0.0721750
+        let z = rLinear * 0.0193339 + gLinear * 0.1191920 + bLinear * 0.9503041
+        
+        // Normalize by reference white (D65)
+        let xn = x / 0.95047
+        let yn = y / 1.00000
+        let zn = z / 1.08883
+        
+        // Convert XYZ to LAB
+        let fx = xn > 0.008856 ? pow(xn, 1.0/3.0) : (7.787 * xn + 16.0/116.0)
+        let fy = yn > 0.008856 ? pow(yn, 1.0/3.0) : (7.787 * yn + 16.0/116.0)
+        let fz = zn > 0.008856 ? pow(zn, 1.0/3.0) : (7.787 * zn + 16.0/116.0)
+        
+        self.L = 116.0 * fy - 16.0
+        self.A = 500.0 * (fx - fy)
+        self.B = 200.0 * (fy - fz)
+    }
+    
+    // Calculate Delta-E (CIE76) - perceptual color difference
+    func deltaE(_ other: LABColor) -> Double {
+        let deltaL = self.L - other.L
+        let deltaA = self.A - other.A
+        let deltaB = self.B - other.B
+        return sqrt(deltaL * deltaL + deltaA * deltaA + deltaB * deltaB)
+    }
+    
+    // Convert back to UIColor
+    var uiColor: UIColor {
+        // Convert LAB to XYZ
+        let fy = (L + 16.0) / 116.0
+        let fx = A / 500.0 + fy
+        let fz = fy - B / 200.0
+        
+        let x = fx > 0.206897 ? pow(fx, 3) : (fx - 16.0/116.0) / 7.787
+        let y = fy > 0.206897 ? pow(fy, 3) : (fy - 16.0/116.0) / 7.787
+        let z = fz > 0.206897 ? pow(fz, 3) : (fz - 16.0/116.0) / 7.787
+        
+        // Denormalize
+        let xDenorm = x * 0.95047
+        let yDenorm = y * 1.00000
+        let zDenorm = z * 1.08883
+        
+        // Convert XYZ to RGB
+        let r = xDenorm * 3.2404542 + yDenorm * -1.5371385 + zDenorm * -0.4985314
+        let g = xDenorm * -0.9692660 + yDenorm * 1.8760108 + zDenorm * 0.0415560
+        let b = xDenorm * 0.0556434 + yDenorm * -0.2040259 + zDenorm * 1.0572252
+        
+        // Gamma correction and clamping
+        let rGamma = max(0, min(1, r > 0.0031308 ? 1.055 * pow(r, 1.0/2.4) - 0.055 : 12.92 * r))
+        let gGamma = max(0, min(1, g > 0.0031308 ? 1.055 * pow(g, 1.0/2.4) - 0.055 : 12.92 * g))
+        let bGamma = max(0, min(1, b > 0.0031308 ? 1.055 * pow(b, 1.0/2.4) - 0.055 : 12.92 * b))
+        
+        return UIColor(red: CGFloat(rGamma), green: CGFloat(gGamma), blue: CGFloat(bGamma), alpha: 1.0)
+    }
+}
+
+// MARK: - Enhanced Color Structures
+struct EnhancedColor {
+    let uiColor: UIColor
+    let labColor: LABColor
+    let frequency: Int
+    var uniqueness: Double = 0.0
+    var visualImportance: Double = 0.0
+    
+    init(r: Int, g: Int, b: Int, frequency: Int) {
+        self.uiColor = UIColor(red: CGFloat(r)/255.0, green: CGFloat(g)/255.0, blue: CGFloat(b)/255.0, alpha: 1.0)
+        self.labColor = LABColor(red: r, green: g, blue: b)
+        self.frequency = frequency
+    }
+    
+    // Calculate uniqueness based on distance to other colors
+    mutating func calculateUniqueness(among colors: [EnhancedColor]) {
+        let distances = colors.compactMap { other in
+            other.uiColor != self.uiColor ? self.labColor.deltaE(other.labColor) : nil
+        }
+        self.uniqueness = distances.isEmpty ? 0 : distances.min() ?? 0
+    }
+    
+    // Calculate visual importance (frequency + uniqueness + contrast)
+    mutating func calculateVisualImportance() {
+        let frequencyScore = log(Double(frequency + 1)) / 10.0  // Normalized frequency
+        let uniquenessScore = min(uniqueness / 30.0, 1.0)       // More sensitive to uniqueness
+        let lightnessBonus = abs(labColor.L - 50) / 50.0        // Contrast from neutral gray
+        let saturationBonus = abs(labColor.A) + abs(labColor.B)  // Color saturation
+        let normalizedSaturation = min(saturationBonus / 100.0, 1.0)
+        
+        // Reduce frequency weight, increase uniqueness weight
+        self.visualImportance = frequencyScore * 0.2 + uniquenessScore * 0.5 + lightnessBonus * 0.15 + normalizedSaturation * 0.15
+    }
+}
+
 // MARK: - MMCQ Result Structure
 struct MMCQResult {
     let colors: [UIColor]
@@ -24,6 +141,8 @@ enum MMCQStage {
     case preprocessing
     case buildingHistogram
     case medianCut(iteration: Int, totalBoxes: Int)
+    case detectingOutliers
+    case mergingColors
     case extractingColors
     case completed
 }
@@ -223,41 +342,53 @@ extension UIImage {
                         isComplete: false
                     ))
                     
-                    // Stage 3: MMCQ Algorithm
-                    let colorBoxes = await performMMCQ(
+                    // Stage 3: Enhanced MMCQ Algorithm
+                    let finalColors = await performEnhancedMMCQ(
                         histogram: histogram,
                         targetColors: targetColors,
                         progressCallback: { iteration, totalBoxes in
-                            let progress = 0.3 + (0.6 * Double(totalBoxes) / Double(targetColors))
+                            let progress: Double
+                            let stage: MMCQStage
+                            
+                            if iteration == 0 && totalBoxes == 0 {
+                                // Outlier detection phase
+                                progress = 0.7
+                                stage = .detectingOutliers
+                            } else if iteration == -1 {
+                                // Merging phase
+                                progress = 0.8
+                                stage = .mergingColors
+                            } else {
+                                // Regular median cut
+                                progress = 0.3 + (0.4 * Double(totalBoxes) / Double(targetColors))
+                                stage = .medianCut(iteration: iteration, totalBoxes: totalBoxes)
+                            }
+                            
                             continuation.yield(MMCQResult(
                                 colors: [],
                                 progress: progress,
-                                stage: .medianCut(iteration: iteration, totalBoxes: totalBoxes),
+                                stage: stage,
                                 colorBoxCount: totalBoxes,
                                 isComplete: false
                             ))
                         }
                     )
                     
-                    // Stage 4: Extract final colors
+                    // Stage 4: Final processing
                     continuation.yield(MMCQResult(
-                        colors: [],
+                        colors: finalColors,
                         progress: 0.9,
                         stage: .extractingColors,
-                        colorBoxCount: colorBoxes.count,
+                        colorBoxCount: finalColors.count,
                         isComplete: false
                     ))
-                    
-                    let finalColors = colorBoxes
-                        .sorted { $0.population > $1.population }
-                        .map { $0.averageColor }
                     
                     // Stage 5: Complete
                     continuation.yield(MMCQResult(
                         colors: finalColors,
                         progress: 1.0,
                         stage: .completed,
-                        colorBoxCount: colorBoxes.count,
+                        colorBoxCount: finalColors.count,
                         isComplete: true
                     ))
                     
@@ -326,6 +457,229 @@ extension UIImage {
         return histogram
     }
     
+    // MARK: - Intelligent Color Processing
+    
+    // Smart color merging using LAB color space
+    private func mergeColors(_ colors: [EnhancedColor], threshold: Double = 10.0) -> [EnhancedColor] {
+        var mergedColors = [EnhancedColor]()
+        var processedIndices = Set<Int>()
+        
+        for (i, color) in colors.enumerated() {
+            if processedIndices.contains(i) { continue }
+            
+            var mergeGroup = [color]
+            processedIndices.insert(i)
+            
+            // Find similar colors to merge
+            for (j, otherColor) in colors.enumerated() {
+                if i != j && !processedIndices.contains(j) {
+                    let deltaE = color.labColor.deltaE(otherColor.labColor)
+                    if deltaE < threshold {
+                        mergeGroup.append(otherColor)
+                        processedIndices.insert(j)
+                    }
+                }
+            }
+            
+            // Create merged color
+            if mergeGroup.count == 1 {
+                mergedColors.append(mergeGroup[0])
+            } else {
+                let mergedColor = createMergedColor(from: mergeGroup)
+                mergedColors.append(mergedColor)
+            }
+        }
+        
+        return mergedColors
+    }
+    
+    // Create a merged color from multiple similar colors
+    private func createMergedColor(from colors: [EnhancedColor]) -> EnhancedColor {
+        let totalFrequency = colors.reduce(0) { $0 + $1.frequency }
+        
+        // Weighted average in LAB space
+        var totalL: Double = 0, totalA: Double = 0, totalB: Double = 0
+        var totalWeight = 0
+        
+        for color in colors {
+            let weight = color.frequency
+            totalL += color.labColor.L * Double(weight)
+            totalA += color.labColor.A * Double(weight)
+            totalB += color.labColor.B * Double(weight)
+            totalWeight += weight
+        }
+        
+        let avgL = totalL / Double(totalWeight)
+        let avgA = totalA / Double(totalWeight)
+        let avgB = totalB / Double(totalWeight)
+        
+        let mergedLab = LABColor(L: avgL, A: avgA, B: avgB)
+        let mergedUIColor = mergedLab.uiColor
+        
+        // Extract RGB components
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        mergedUIColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        
+        return EnhancedColor(
+            r: Int(r * 255),
+            g: Int(g * 255),
+            b: Int(b * 255),
+            frequency: totalFrequency
+        )
+    }
+    
+    // Detect outlier colors that should be preserved
+    private func detectOutlierColors(_ colors: [EnhancedColor]) -> [EnhancedColor] {
+        guard colors.count > 3 else { return colors }
+        
+        var outliers = [EnhancedColor]()
+        
+        // Sort by uniqueness (visual distinctiveness) instead of frequency
+        for color in colors {
+            // Calculate minimum distance to all other colors
+            let distances = colors.compactMap { other in
+                other.uiColor != color.uiColor ? color.labColor.deltaE(other.labColor) : nil
+            }
+            
+            guard let minDistance = distances.min() else { continue }
+            
+            // If this color is visually distinct, it's an outlier worth keeping
+            // Lower threshold = more outliers detected
+            if minDistance > 10.0 {
+                outliers.append(color)
+            }
+        }
+        
+        // Sort outliers by their uniqueness (most unique first)
+        return outliers.sorted { color1, color2 in
+            let dist1 = colors.compactMap { other in
+                other.uiColor != color1.uiColor ? color1.labColor.deltaE(other.labColor) : nil
+            }.min() ?? 0
+            
+            let dist2 = colors.compactMap { other in
+                other.uiColor != color2.uiColor ? color2.labColor.deltaE(other.labColor) : nil  
+            }.min() ?? 0
+            
+            return dist1 > dist2
+        }
+    }
+    
+    // Enhanced MMCQ with dual-phase extraction
+    private func performEnhancedMMCQ(
+        histogram: [ColorKey: Int],
+        targetColors: Int,
+        progressCallback: @escaping (Int, Int) -> Void
+    ) async -> [UIColor] {
+        
+        // Convert all colors to enhanced format
+        let allColors = histogram.map { (key, frequency) in
+            EnhancedColor(r: key.r, g: key.g, b: key.b, frequency: frequency)
+        }
+        
+        // Phase 1: Find the most unique/distinct colors first (outliers)
+        // Report outlier detection phase
+        await MainActor.run {
+            progressCallback(0, 0)  // Special signal for outlier detection
+        }
+        
+        let outliers = detectOutlierColors(allColors)
+        var finalColorSet = [EnhancedColor]()
+        
+        // Add the most unique colors first (up to half of target)
+        let outlierCount = min(outliers.count, targetColors / 2)
+        finalColorSet.append(contentsOf: outliers.prefix(outlierCount))
+        
+        // Phase 2: Use MMCQ for remaining dominant colors
+        let remainingTarget = targetColors - finalColorSet.count
+        if remainingTarget > 0 {
+            let dominantBoxes = await performMMCQ(
+                histogram: histogram,
+                targetColors: remainingTarget + 2, // Extract a few extra
+                progressCallback: progressCallback
+            )
+            
+            // Convert to enhanced colors
+            let dominantColors = dominantBoxes.compactMap { box -> EnhancedColor? in
+                guard !box.histogram.isEmpty else { return nil }
+                
+                // Use average color of the box
+                var totalR = 0, totalG = 0, totalB = 0, totalCount = 0
+                for (colorKey, count) in box.histogram {
+                    totalR += colorKey.r * count
+                    totalG += colorKey.g * count
+                    totalB += colorKey.b * count
+                    totalCount += count
+                }
+                
+                guard totalCount > 0 else { return nil }
+                
+                return EnhancedColor(
+                    r: totalR / totalCount,
+                    g: totalG / totalCount,
+                    b: totalB / totalCount,
+                    frequency: totalCount
+                )
+            }
+            
+            // Add dominant colors that are different from outliers
+            for dominant in dominantColors {
+                let minDistance = finalColorSet.map {
+                    dominant.labColor.deltaE($0.labColor)
+                }.min() ?? Double.infinity
+                
+                if minDistance > 10.0 { // Not too similar to existing colors
+                    finalColorSet.append(dominant)
+                    if finalColorSet.count >= targetColors { break }
+                }
+            }
+        }
+        
+        // Phase 3: Calculate uniqueness and importance for all colors
+        var enhancedColors = finalColorSet
+        for i in 0..<enhancedColors.count {
+            enhancedColors[i].calculateUniqueness(among: enhancedColors)
+            enhancedColors[i].calculateVisualImportance()
+        }
+        
+        // Report merging phase  
+        await MainActor.run {
+            progressCallback(-1, 0)  // Special signal for merging
+        }
+        
+        // Phase 4: Merge similar colors
+        // Use a more conservative threshold to avoid over-merging
+        print("Before merging: \(enhancedColors.count) colors")
+        let mergedColors = mergeColors(enhancedColors, threshold: 8.0)
+        print("After merging: \(mergedColors.count) colors")
+        
+        // Phase 5: Sort by visual importance and return top colors
+        var finalColors = mergedColors
+            .sorted { $0.visualImportance > $1.visualImportance }
+            .prefix(targetColors)
+            .map { $0.uiColor }
+        print("Final colors count: \(finalColors.count)")
+        
+        // Ensure we have at least the requested number of colors
+        // If not enough after merging, add back some original colors
+        if finalColors.count < targetColors {
+            let additionalColors = allColors
+                .sorted { $0.frequency > $1.frequency }
+                .compactMap { enhancedColor -> UIColor? in
+                    let isUnique = finalColors.allSatisfy { existingColor in
+                        enhancedColor.labColor.deltaE(LABColor(red: Int(existingColor.cgColor.components?[0] ?? 0 * 255), 
+                                                             green: Int(existingColor.cgColor.components?[1] ?? 0 * 255), 
+                                                             blue: Int(existingColor.cgColor.components?[2] ?? 0 * 255))) > 8.0
+                    }
+                    return isUnique ? enhancedColor.uiColor : nil
+                }
+                .prefix(targetColors - finalColors.count)
+            
+            finalColors.append(contentsOf: additionalColors)
+        }
+        
+        return Array(finalColors)
+    }
+
     // MARK: - MMCQ Core Algorithm
     private func performMMCQ(
         histogram: [ColorKey: Int],
@@ -374,8 +728,10 @@ extension UIImage {
             colorBoxes.append(rightBox)
             
             // Report progress
+            let currentIteration = iteration
+            let currentBoxCount = colorBoxes.count
             await MainActor.run {
-                progressCallback(iteration, colorBoxes.count)
+                progressCallback(currentIteration, currentBoxCount)
             }
             
             // Yield control
@@ -416,12 +772,16 @@ class MMCQViewModel: ObservableObject {
                         statusMessage = "Preparing image..."
                     case .buildingHistogram:
                         statusMessage = "Building color histogram..."
-                    case .medianCut(let iteration, let totalBoxes):
+                    case .medianCut(_, let totalBoxes):
                         statusMessage = "Median cut: \(totalBoxes) color regions"
+                    case .detectingOutliers:
+                        statusMessage = "Detecting unique outlier colors..."
+                    case .mergingColors:
+                        statusMessage = "Merging similar colors (LAB ΔE<12)..."
                     case .extractingColors:
-                        statusMessage = "Extracting final colors..."
+                        statusMessage = "Ranking by visual importance..."
                     case .completed:
-                        statusMessage = "MMCQ extraction complete!"
+                        statusMessage = "Enhanced MMCQ complete!"
                     }
                     
                     if result.isComplete {
@@ -444,13 +804,18 @@ struct MMCQColorExtractor: View {
     
     var body: some View {
         VStack(spacing: 20) {
-            Text("MMCQ Color Extractor")
+            Text("Enhanced MMCQ Extractor")
                 .font(.largeTitle.bold())
                 .foregroundColor(.primary)
             
-            Text("Deterministic • Superior Quality • No Random Results")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            VStack(spacing: 4) {
+                Text("✓ LAB Color Space • ✓ Delta-E Merging • ✓ Outlier Detection")
+                    .font(.caption)
+                    .foregroundColor(.green)
+                Text("Solves: Similar Colors & Missing Outliers")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
             
             Image(.reflect)
                 .resizable()
@@ -468,9 +833,32 @@ struct MMCQColorExtractor: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("\(Int(viewModel.progress * 100))% • \(viewModel.colorBoxCount) regions")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    HStack {
+                        Text("\(Int(viewModel.progress * 100))%")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Spacer()
+                        
+                        switch viewModel.currentStage {
+                        case .medianCut(_, let totalBoxes):
+                            Text("\(totalBoxes) regions")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                        case .detectingOutliers:
+                            Text("Finding outliers")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        case .mergingColors:
+                            Text("LAB ΔE merging")
+                                .font(.caption)
+                                .foregroundColor(.purple)
+                        default:
+                            Text("Processing...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
                 .padding(.horizontal)
                 .animation(.easeInOut(duration: 0.3), value: viewModel.statusMessage)
@@ -515,7 +903,7 @@ struct MMCQColorExtractor: View {
                     .disabled(viewModel.isExtracting)
                 
                 Button(action: {
-                    let image = UIImage(resource: .reflect)
+                    let image = UIImage(resource: .glass)
                     viewModel.extractColors(from: image, targetColors: Int(targetColors))
                 }) {
                     HStack {
