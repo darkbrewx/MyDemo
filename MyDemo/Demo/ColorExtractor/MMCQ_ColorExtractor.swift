@@ -903,7 +903,7 @@ struct MMCQColorExtractor: View {
                     .disabled(viewModel.isExtracting)
                 
                 Button(action: {
-                    let image = UIImage(resource: .glass)
+                    let image = UIImage(resource: .reflect)
                     viewModel.extractColors(from: image, targetColors: Int(targetColors))
                 }) {
                     HStack {
