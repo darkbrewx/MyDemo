@@ -14,6 +14,21 @@ struct ColorExtractionResult {
     let progress: Double
     let iteration: Int
     let isComplete: Bool
+    let stage: ExtractionStage
+    let convergenceInfo: ConvergenceInfo?
+}
+
+enum ExtractionStage {
+    case preprocessing
+    case kmeans(iteration: Int, totalIterations: Int)
+    case converged
+    case completed
+}
+
+struct ConvergenceInfo {
+    let convergedAt: Int
+    let centerMovements: [CGFloat]
+    let averageMovement: CGFloat
 }
 
 // MARK: - Array Extension for Chunking
@@ -99,6 +114,16 @@ extension UIImage {
                         throw NSError(domain: "UIImageColorExtractionError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid image"])
                     }
                     
+                    // Report preprocessing stage
+                    continuation.yield(ColorExtractionResult(
+                        colors: [],
+                        progress: 0.1,
+                        iteration: 0,
+                        isComplete: false,
+                        stage: .preprocessing,
+                        convergenceInfo: nil
+                    ))
+                    
                     let downSizedImage = await downSized(width: 100, height: 100)
                     guard let cgImage = downSizedImage.cgImage else {
                         throw NSError(domain: "UIImageColorExtractionError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to create CGImage"])
@@ -106,9 +131,21 @@ extension UIImage {
                     
                     let pixelData = try await getPixelData(cgImage: cgImage)
                     
+                    // Report preprocessing completion
+                    continuation.yield(ColorExtractionResult(
+                        colors: [],
+                        progress: 0.2,
+                        iteration: 0,
+                        isComplete: false,
+                        stage: .preprocessing,
+                        convergenceInfo: nil
+                    ))
+                    
                     // Initialize clusters
                     var clusters = initializeClusters(pixels: pixelData, count: colorCount)
                     let maxIterations = 10
+                    
+                    var previousCenters = clusters.map { $0.center }
                     
                     for iteration in 0..<maxIterations {
                         // Check for cancellation
@@ -120,16 +157,41 @@ extension UIImage {
                         // Perform one iteration
                         clusters = await performKMeansIteration(pixels: pixelData, clusters: clusters)
                         
+                        // Check for convergence and calculate movements
+                        let currentCenters = clusters.map { $0.center }
+                        let movements = zip(previousCenters, currentCenters).map { 
+                            euclideanDistance(pixel1: $0, pixel2: $1) 
+                        }
+                        let averageMovement = movements.reduce(0, +) / CGFloat(movements.count)
+                        let hasConverged = movements.allSatisfy { $0 <= 1.0 }
+                        
                         // Convert to colors and yield result
                         let colors = clustersToColors(clusters)
-                        let progress = Double(iteration + 1) / Double(maxIterations)
+                        let baseProgress = 0.2 + (0.8 * Double(iteration + 1) / Double(maxIterations))
+                        let progress = hasConverged ? 1.0 : baseProgress
+                        
+                        let convergenceInfo = hasConverged ? ConvergenceInfo(
+                            convergedAt: iteration + 1,
+                            centerMovements: movements,
+                            averageMovement: averageMovement
+                        ) : nil
                         
                         continuation.yield(ColorExtractionResult(
                             colors: colors,
                             progress: progress,
                             iteration: iteration + 1,
-                            isComplete: iteration == maxIterations - 1
+                            isComplete: hasConverged || iteration == maxIterations - 1,
+                            stage: hasConverged ? .converged : .kmeans(iteration: iteration + 1, totalIterations: maxIterations),
+                            convergenceInfo: convergenceInfo
                         ))
+                        
+                        // Early termination if converged
+                        if hasConverged {
+                            break
+                        }
+                        
+                        // Update previous centers for next iteration
+                        previousCenters = clusters.map { $0.center }
                         
                         // Optional: yield after each update to show progress
                         await Task.yield()
@@ -162,15 +224,44 @@ extension UIImage {
 
     // MARK: - K-means Implementation
 
-    // Initialize clusters with random centers
+    // Initialize clusters using K-means++ algorithm for better convergence
     private func initializeClusters(pixels: [PixelData], count: Int) -> [Cluster] {
-        var clusters = [Cluster]()
-        for _ in 0..<count {
-            if let randomPixel = pixels.randomElement() {
-                clusters.append(Cluster(center: randomPixel, points: []))
+        guard !pixels.isEmpty && count > 0 else { return [] }
+        
+        var centers = [PixelData]()
+        
+        // Step 1: Choose first center randomly
+        if let firstCenter = pixels.randomElement() {
+            centers.append(firstCenter)
+        }
+        
+        // Step 2: Choose remaining centers using K-means++ algorithm
+        for _ in 1..<count {
+            var distances = [CGFloat]()
+            var totalDistance: CGFloat = 0
+            
+            // Calculate squared distances to nearest existing center
+            for pixel in pixels {
+                let minDistance = centers.map { euclideanDistance(pixel1: pixel, pixel2: $0) }.min() ?? 0
+                let squaredDistance = minDistance * minDistance
+                distances.append(squaredDistance)
+                totalDistance += squaredDistance
+            }
+            
+            // Choose next center based on probability proportional to squared distance
+            let randomValue = CGFloat.random(in: 0...totalDistance)
+            var cumulativeDistance: CGFloat = 0
+            
+            for (index, distance) in distances.enumerated() {
+                cumulativeDistance += distance
+                if cumulativeDistance >= randomValue {
+                    centers.append(pixels[index])
+                    break
+                }
             }
         }
-        return clusters
+        
+        return centers.map { Cluster(center: $0, points: []) }
     }
     
     // Convert clusters to UIColors
@@ -258,6 +349,24 @@ extension UIImage {
         
         return closestIndex
     }
+    
+    // Check if algorithm has converged by comparing center movements
+    private func checkConvergence(
+        previousCenters: [PixelData],
+        currentCenters: [PixelData],
+        threshold: CGFloat
+    ) -> Bool {
+        guard previousCenters.count == currentCenters.count else { return false }
+        
+        for (prev, curr) in zip(previousCenters, currentCenters) {
+            let distance = euclideanDistance(pixel1: prev, pixel2: curr)
+            if distance > threshold {
+                return false
+            }
+        }
+        
+        return true
+    }
 
     // Original K-means method for compatibility
     private func kMeansClustering(pixels: [PixelData], colorCount: Int, maxIterations: Int = 10) async -> [Cluster] {
@@ -301,6 +410,9 @@ class ColorExtractorViewModel: ObservableObject {
     @Published var progress: Double = 0
     @Published var isExtracting = false
     @Published var currentIteration = 0
+    @Published var currentStage: ExtractionStage = .preprocessing
+    @Published var convergenceInfo: ConvergenceInfo?
+    @Published var statusMessage = ""
     
     func extractColors(from image: UIImage) {
         Task {
@@ -308,12 +420,27 @@ class ColorExtractorViewModel: ObservableObject {
             colors = []
             progress = 0
             currentIteration = 0
+            convergenceInfo = nil
             
             do {
                 for try await result in image.extractColorsProgressive(colorCount: 5) {
                     colors = result.colors
                     progress = result.progress
                     currentIteration = result.iteration
+                    currentStage = result.stage
+                    convergenceInfo = result.convergenceInfo
+                    
+                    // Update status message based on stage
+                    switch result.stage {
+                    case .preprocessing:
+                        statusMessage = "Processing image..."
+                    case .kmeans(let iter, let total):
+                        statusMessage = "Clustering iteration \(iter)/\(total)"
+                    case .converged:
+                        statusMessage = "Converged early!"
+                    case .completed:
+                        statusMessage = "Extraction complete"
+                    }
                     
                     if result.isComplete {
                         isExtracting = false
@@ -322,6 +449,7 @@ class ColorExtractorViewModel: ObservableObject {
                 }
             } catch {
                 print("Color extraction failed: \(error)")
+                statusMessage = "Extraction failed"
                 isExtracting = false
             }
         }
@@ -339,15 +467,33 @@ struct ProgressiveColorExtractor: View {
                 .frame(height: 200)
             
             if viewModel.isExtracting {
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     ProgressView(value: viewModel.progress)
                         .progressViewStyle(LinearProgressViewStyle())
                     
-                    Text("Iteration \(viewModel.currentIteration)/10 - \(Int(viewModel.progress * 100))%")
+                    Text(viewModel.statusMessage)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Text("\(Int(viewModel.progress * 100))% complete")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                    
+                    if let convergenceInfo = viewModel.convergenceInfo {
+                        VStack(spacing: 4) {
+                            Text("✓ Converged at iteration \(convergenceInfo.convergedAt)")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                            
+                            Text("Average movement: \(String(format: "%.2f", convergenceInfo.averageMovement))")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.top, 4)
+                    }
                 }
                 .padding(.horizontal)
+                .animation(.easeInOut(duration: 0.3), value: viewModel.statusMessage)
             }
             
             if !viewModel.colors.isEmpty {
