@@ -18,6 +18,7 @@ struct ContentView: View {
                 NavigationLink("DownsizedImageViewDemo", destination: DownsizedImageViewDemo())
                 NavigationLink("InfiniteScrollViewDemo", destination: InfiniteScrollViewDemo())
                 NavigationLink("MovableCardsDemo", destination: MovableCardsDemo())
+                NavigationLink("CustomSwipeActionDemo", destination: CustomSwipeActionDemo())
             }
         }
     }

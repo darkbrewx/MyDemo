@@ -10,9 +10,22 @@
 		F36D6ECF2E40C56000FA5AA6 /* MyDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F381C41A2EEB0BEE00EA6EB7 /* Exceptions for "MyDemo" folder in "MyDemo" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Demo/Expense Tracker/Packages/Networking/.swiftpm/xcode/xcuserdata/FunnyValentine.xcuserdatad/xcschemes/xcschememanagement.plist",
+			);
+			target = F36D6ECE2E40C56000FA5AA6 /* MyDemo */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		F36D6ED12E40C56000FA5AA6 /* MyDemo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F381C41A2EEB0BEE00EA6EB7 /* Exceptions for "MyDemo" folder in "MyDemo" target */,
+			);
 			path = MyDemo;
 			sourceTree = "<group>";
 		};
