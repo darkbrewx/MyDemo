@@ -11,9 +11,12 @@ import SwiftUI
 struct MyDemoApp: App {
     let persistenceController = PersistenceController.shared
     var body: some Scene {
-        WindowGroup {
+        LaunchScreen {
+            Image(.appleLogo)
+        } rootContent: {
             ContentView()
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
         }
+
     }
 }
