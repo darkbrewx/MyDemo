@@ -19,6 +19,7 @@ struct ContentView: View {
                 NavigationLink("InfiniteScrollViewDemo", destination: InfiniteScrollViewDemo())
                 NavigationLink("MovableCardsDemo", destination: MovableCardsDemo())
                 NavigationLink("CustomSwipeActionDemo", destination: CustomSwipeActionDemo())
+                NavigationLink("PaywallDemo", destination: PaywallViewDemo())
             }
         }
     }
